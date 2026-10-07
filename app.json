@@ -3,6 +3,7 @@
     "name": "timetable-app",
     "slug": "timetable-app",
     "version": "1.0.0",
+    "scheme": "timetableapp",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "light",
@@ -20,6 +21,10 @@
     },
     "web": {
       "favicon": "./assets/favicon.png"
-    }
+    },
+    "plugins": [
+      "expo-router",
+      "expo-status-bar"
+    ]
   }
 }
