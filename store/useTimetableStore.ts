@@ -7,13 +7,10 @@ export interface TimetableSlot {
   id: string;
   userId: string;
   title: string;
-  subtitle?: string;
-  time: string; 
-  startTime: string;
-  endTime: string;
-  dayOfWeek: number;     
+  startTime: string; // Stored in 24h format (e.g., "09:00") for perfect sorting
+  endTime: string;   // Stored in 24h format (e.g., "10:30")
+  dayOfWeek: number; // 1 (Mon) - 7 (Sun)
   colorTag: string; 
-  day: string;     
 }
 
 interface TimetableState {

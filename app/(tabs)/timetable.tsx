@@ -20,11 +20,11 @@ export default function TimetableScreen() {
   // Modal State
   const [isModalVisible, setModalVisible] = useState(false);
   const [newTitle, setNewTitle] = useState('');
-  const [newTime, setNewTime] = useState('');
+  const [newStartTime, setNewStartTime] = useState('');
+  const [newEndTime, setNewEndTime] = useState('');
   const [selectedDay, setSelectedDay] = useState(1); // 1 = Mon
   const [selectedColor, setSelectedColor] = useState(COLORS[0]);
 
-  // Connect to Firestore on Mount
   useEffect(() => {
     if (user?.uid) {
       const unsubscribe = subscribeToSlots(user.uid);
@@ -33,102 +33,83 @@ export default function TimetableScreen() {
   }, [user]);
 
   const handleAddSlot = async () => {
-    if (!newTitle || !newTime || !user) return;
+    if (!newTitle || !newStartTime || !newEndTime || !user) {
+      Alert.alert("Missing Fields", "Please fill out the title, start time, and end time.");
+      return;
+    }
 
     const newSlot: TimetableSlot = {
-      id: Date.now().toString(), // Simple ID generator
+      id: Date.now().toString(), 
       userId: user.uid,
       title: newTitle,
-      time: newTime,
+      startTime: newStartTime, // Expects standard format like "09:00"
+      endTime: newEndTime,     // Expects standard format like "10:30"
       dayOfWeek: selectedDay,
       colorTag: selectedColor,
-      startTime: newTime.split(' - ')[0] || newTime, // Assuming format "HH:MM - HH:MM"
-      endTime: newTime.split(' - ')[1] || newTime,   // Assuming format "HH:MM - HH:MM"
-      day: DAYS[selectedDay - 1], // Convert 1-7 to 0-6 index
     };
 
     await addSlot(newSlot);
     setModalVisible(false);
     setNewTitle('');
-    setNewTime('');
+    setNewStartTime('');
+    setNewEndTime('');
   };
 
-  // Filter slots based on Day or Week view
-  const currentDayIndex = new Date().getDay() === 0 ? 7 : new Date().getDay(); // Convert Sun(0) to 7
+  const currentDayIndex = new Date().getDay() === 0 ? 7 : new Date().getDay(); 
 
   const displayedSlots = viewMode === 'day'
     ? slots.filter(s => s.dayOfWeek === currentDayIndex)
     : slots;
 
-  // Sort slots by Day, then alphabetically by Time (for simplicity)
+  // Perfect Chronological Sorting based on startTime
   const sortedSlots = displayedSlots.sort((a, b) => {
     if (a.dayOfWeek !== b.dayOfWeek) return a.dayOfWeek - b.dayOfWeek;
-    return a.time.localeCompare(b.time);
+    // Because format is strict "HH:MM", localeCompare works flawlessly
+    return a.startTime.localeCompare(b.startTime);
   });
 
   const syncDeviceCalendar = async () => {
     try {
-      // 1. Ask for permission
       const { status } = await Calendar.requestCalendarPermissionsAsync();
       if (status !== 'granted') {
         Alert.alert("Permission Denied", "We need access to sync your calendar.");
         return;
       }
 
-      // 2. Fetch all calendars on the device
       const calendars = await Calendar.getCalendarsAsync(Calendar.EntityTypes.EVENT);
-
-      // Filter out calendars that aren't easily readable or are just holiday lists (optional, but good practice)
       const activeCalendars = calendars.filter(c => c.allowsModifications || Platform.OS === 'ios');
       const calendarIds = activeCalendars.map(c => c.id);
 
-      if (calendarIds.length === 0) {
-        Alert.alert("No Calendars", "No active calendars found on this device.");
-        return;
-      }
+      if (calendarIds.length === 0) return;
 
-      // 3. Define the time range (Today from 12:00 AM to 11:59 PM)
       const startDate = new Date();
       startDate.setHours(0, 0, 0, 0);
-
       const endDate = new Date();
       endDate.setHours(23, 59, 59, 999);
 
-      // 4. Fetch the actual events!
       const events = await Calendar.getEventsAsync(calendarIds, startDate, endDate);
-
-      console.log("Device Events Fetched:", events);
-      Alert.alert("Sync Successful!", `We found ${events.length} events for today.`);
-
-      // 5. Map and Update the Store!
       let addedCount = 0;
 
       for (const event of events) {
-        // Skip all-day events so they don't clutter the exact hourly timetable
         if (event.allDay) continue;
 
         const start = new Date(event.startDate);
         const end = new Date(event.endDate);
         
-        // Helper to format Date into "HH:MM" (e.g., "09:30")
+        // Formats strictly to "09:30" (24h format for perfect sorting)
         const formatTime = (date: Date) => 
           `${date.getHours().toString().padStart(2, '0')}:${date.getMinutes().toString().padStart(2, '0')}`;
 
-        // Create a new TimetableSlot matching your store's interface
         const newSlot: TimetableSlot = {
           id: `calendar-${event.id}`,
           userId: user?.uid || '',
           title: event.title || 'Busy',
           startTime: formatTime(start),
           endTime: formatTime(end),
-          // Gets the full day name (e.g., "Monday")
-          day: start.toLocaleDateString('en-US', { weekday: 'long' }),
-          time: `${formatTime(start)} - ${formatTime(end)}`,
-          dayOfWeek: start.getDay() === 0 ? 7 : start.getDay(), // Convert Sun(0) to 7
-          colorTag: COLORS[Math.floor(Math.random() * COLORS.length)], // Random color for visual variety
+          dayOfWeek: start.getDay() === 0 ? 7 : start.getDay(),
+          colorTag: COLORS[Math.floor(Math.random() * COLORS.length)],
         };
 
-        // Push to Zustand / Firebase
         try {
           await addSlot(newSlot);
           addedCount++;
@@ -138,7 +119,6 @@ export default function TimetableScreen() {
       }
 
       Alert.alert("Sync Complete!", `Successfully imported ${addedCount} events to your timetable.`);
-
     } catch (error) {
       console.error("Calendar Sync Error:", error);
       Alert.alert("Error", "Could not sync calendar.");
@@ -147,19 +127,12 @@ export default function TimetableScreen() {
 
   return (
     <View style={styles.container}>
-      {/* Header & View Toggles */}
       <View style={styles.header}>
         <View style={styles.toggleContainer}>
-          <TouchableOpacity
-            style={[styles.toggleBtn, viewMode === 'day' && styles.activeToggle]}
-            onPress={() => setViewMode('day')}
-          >
+          <TouchableOpacity style={[styles.toggleBtn, viewMode === 'day' && styles.activeToggle]} onPress={() => setViewMode('day')}>
             <Text style={[styles.toggleText, viewMode === 'day' && styles.activeToggleText]}>Today</Text>
           </TouchableOpacity>
-          <TouchableOpacity
-            style={[styles.toggleBtn, viewMode === 'week' && styles.activeToggle]}
-            onPress={() => setViewMode('week')}
-          >
+          <TouchableOpacity style={[styles.toggleBtn, viewMode === 'week' && styles.activeToggle]} onPress={() => setViewMode('week')}>
             <Text style={[styles.toggleText, viewMode === 'week' && styles.activeToggleText]}>Week</Text>
           </TouchableOpacity>
         </View>
@@ -169,11 +142,9 @@ export default function TimetableScreen() {
         <Text style={{ color: '#fff', fontWeight: 'bold' }}>Sync Device Calendar 📅</Text>
       </TouchableOpacity>
 
-      {/* Loading State */}
       {isLoading ? (
         <ActivityIndicator size="large" color="#FF5733" style={{ marginTop: 50 }} />
       ) : (
-        /* Slots List */
         <ScrollView contentContainerStyle={styles.scrollContent}>
           {sortedSlots.length === 0 ? (
             <Text style={styles.emptyText}>No classes or events scheduled.</Text>
@@ -182,8 +153,9 @@ export default function TimetableScreen() {
               <View key={slot.id} style={[styles.slotCard, { borderLeftColor: slot.colorTag }]}>
                 <View style={styles.slotInfo}>
                   <Text style={styles.slotTitle}>{slot.title}</Text>
+                  {/* Combines startTime and endTime perfectly on the fly for display */}
                   <Text style={styles.slotTime}>
-                    {DAYS[slot.dayOfWeek - 1]} • {slot.time}
+                    {DAYS[slot.dayOfWeek - 1]} • {slot.startTime} - {slot.endTime}
                   </Text>
                 </View>
                 <TouchableOpacity onPress={() => deleteSlot(slot.id)} style={styles.deleteBtn}>
@@ -195,28 +167,25 @@ export default function TimetableScreen() {
         </ScrollView>
       )}
 
-      {/* Floating Action Button */}
       <TouchableOpacity style={styles.fab} onPress={() => setModalVisible(true)}>
         <Ionicons name="add" size={30} color="#fff" />
       </TouchableOpacity>
 
-      {/* Add Slot Modal */}
       <Modal visible={isModalVisible} animationType="slide" transparent={true}>
         <View style={styles.modalOverlay}>
           <View style={styles.modalContent}>
             <Text style={styles.modalTitle}>New Time Block</Text>
 
             <TextInput style={styles.input} placeholder="Title (e.g. CS101 Lecture)" value={newTitle} onChangeText={setNewTitle} />
-            <TextInput style={styles.input} placeholder="Time (e.g. 09:00 AM - 10:30 AM)" value={newTime} onChangeText={setNewTime} />
+            <View style={{flexDirection: 'row', gap: 10}}>
+               <TextInput style={[styles.input, {flex: 1}]} placeholder="Start (e.g. 09:00)" value={newStartTime} onChangeText={setNewStartTime} />
+               <TextInput style={[styles.input, {flex: 1}]} placeholder="End (e.g. 10:30)" value={newEndTime} onChangeText={setNewEndTime} />
+            </View>
 
             <Text style={styles.label}>Day of Week</Text>
             <View style={styles.daysRow}>
               {DAYS.map((day, index) => (
-                <TouchableOpacity
-                  key={day}
-                  style={[styles.dayChip, selectedDay === index + 1 && styles.activeDayChip]}
-                  onPress={() => setSelectedDay(index + 1)}
-                >
+                <TouchableOpacity key={day} style={[styles.dayChip, selectedDay === index + 1 && styles.activeDayChip]} onPress={() => setSelectedDay(index + 1)}>
                   <Text style={[styles.dayText, selectedDay === index + 1 && styles.activeDayText]}>{day}</Text>
                 </TouchableOpacity>
               ))}
@@ -225,11 +194,7 @@ export default function TimetableScreen() {
             <Text style={styles.label}>Color Tag</Text>
             <View style={styles.colorRow}>
               {COLORS.map((color) => (
-                <TouchableOpacity
-                  key={color}
-                  style={[styles.colorCircle, { backgroundColor: color }, selectedColor === color && styles.activeColor]}
-                  onPress={() => setSelectedColor(color)}
-                />
+                <TouchableOpacity key={color} style={[styles.colorCircle, { backgroundColor: color }, selectedColor === color && styles.activeColor]} onPress={() => setSelectedColor(color)} />
               ))}
             </View>
 
