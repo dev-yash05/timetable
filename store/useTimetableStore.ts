@@ -8,9 +8,12 @@ export interface TimetableSlot {
   userId: string;
   title: string;
   subtitle?: string;
-  time: string;          // e.g., "09:00 AM - 10:30 AM"
-  dayOfWeek: number;     // 1 (Mon) - 7 (Sun)
-  colorTag: string;      // Hex, e.g., "#FF5733"
+  time: string; 
+  startTime: string;
+  endTime: string;
+  dayOfWeek: number;     
+  colorTag: string; 
+  day: string;     
 }
 
 interface TimetableState {

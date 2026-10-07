@@ -1,10 +1,11 @@
 // app/(tabs)/tasks.tsx
 import { useEffect, useState } from 'react';
 import { 
-  View, Text, StyleSheet, TouchableOpacity, ScrollView, 
+  View, Text, StyleSheet, TouchableOpacity, 
   Modal, TextInput, ActivityIndicator, Platform 
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
+import DraggableFlatList, { RenderItemParams, ScaleDecorator } from 'react-native-draggable-flatlist';
 import { useTaskStore, Task } from '../../store/useTaskStore';
 import { useAuthStore } from '../../store/useAuthStore';
 
@@ -13,7 +14,7 @@ const PRIORITIES: ('high' | 'medium' | 'low')[] = ['high', 'medium', 'low'];
 
 export default function TasksScreen() {
   const { user } = useAuthStore();
-  const { tasks, isLoading, subscribeToTasks, addTask, toggleTask, deleteTask } = useTaskStore();
+  const { tasks, isLoading, subscribeToTasks, addTask, toggleTask, deleteTask, setTaskOrder } = useTaskStore();
   
   const [filter, setFilter] = useState<FilterType>('pending');
   
@@ -22,7 +23,6 @@ export default function TasksScreen() {
   const [newTaskTitle, setNewTaskTitle] = useState('');
   const [newPriority, setNewPriority] = useState<'high' | 'medium' | 'low'>('medium');
 
-  // Connect to Firestore on Mount
   useEffect(() => {
     if (user?.uid) {
       const unsubscribe = subscribeToTasks(user.uid);
@@ -51,7 +51,7 @@ export default function TasksScreen() {
   const filteredTasks = tasks.filter((t) => {
     if (filter === 'pending') return !t.isCompleted;
     if (filter === 'completed') return t.isCompleted;
-    return true; // 'all'
+    return true; 
   });
 
   const getPriorityColor = (priority: string) => {
@@ -61,6 +61,48 @@ export default function TasksScreen() {
       default: return '#8E8E93';
     }
   };
+
+  // The draggable card component
+  const renderTask = ({ item, drag, isActive }: RenderItemParams<Task>) => (
+    <ScaleDecorator>
+      <TouchableOpacity
+        activeOpacity={1}
+        style={[styles.taskCard, { elevation: isActive ? 10 : 2, shadowOpacity: isActive ? 0.2 : 0.05 }]}
+        onLongPress={drag} 
+        disabled={isActive}
+      >
+        {/* Drag Handle */}
+        <TouchableOpacity onPressIn={drag} style={styles.dragHandle}>
+          <Ionicons name="reorder-three" size={28} color="#C7C7CC" />
+        </TouchableOpacity>
+
+        {/* Checkbox */}
+        <TouchableOpacity onPress={() => toggleTask(item.id, item.isCompleted)} style={styles.checkbox}>
+          <Ionicons 
+            name={item.isCompleted ? "checkmark-circle" : "ellipse-outline"} 
+            size={28} 
+            color={item.isCompleted ? "#34C759" : "#C7C7CC"} 
+          />
+        </TouchableOpacity>
+
+        {/* Task Details */}
+        <View style={styles.taskInfo}>
+          <Text style={[styles.taskTitle, item.isCompleted && styles.completedText]}>
+            {item.title}
+          </Text>
+          <View style={styles.priorityBadge}>
+            <View style={[styles.priorityDot, { backgroundColor: getPriorityColor(item.priority) }]} />
+            <Text style={styles.priorityText}>{item.priority} priority</Text>
+          </View>
+        </View>
+
+        {/* Delete Button (Notifications Removed!) */}
+        <TouchableOpacity onPress={() => deleteTask(item.id)} style={styles.deleteBtn}>
+          <Ionicons name="trash-outline" size={20} color="#FF3B30" />
+        </TouchableOpacity>
+      </TouchableOpacity>
+    </ScaleDecorator>
+  );
 
   return (
     <View style={styles.container}>
@@ -81,46 +123,19 @@ export default function TasksScreen() {
         </View>
       </View>
 
-      {/* Loading State */}
+      {/* Loading State or Draggable List */}
       {isLoading ? (
         <ActivityIndicator size="large" color="#FF5733" style={{ marginTop: 50 }} />
+      ) : filteredTasks.length === 0 ? (
+        <Text style={styles.emptyText}>No tasks found in this view.</Text>
       ) : (
-        /* Tasks List */
-        <ScrollView contentContainerStyle={styles.scrollContent}>
-          {filteredTasks.length === 0 ? (
-            <Text style={styles.emptyText}>No tasks found in this view.</Text>
-          ) : (
-            filteredTasks.map((task) => (
-              <View key={task.id} style={styles.taskCard}>
-                
-                {/* Custom Checkbox */}
-                <TouchableOpacity onPress={() => toggleTask(task.id, task.isCompleted)} style={styles.checkbox}>
-                  <Ionicons 
-                    name={task.isCompleted ? "checkmark-circle" : "ellipse-outline"} 
-                    size={28} 
-                    color={task.isCompleted ? "#34C759" : "#C7C7CC"} 
-                  />
-                </TouchableOpacity>
-
-                {/* Task Details */}
-                <View style={styles.taskInfo}>
-                  <Text style={[styles.taskTitle, task.isCompleted && styles.completedText]}>
-                    {task.title}
-                  </Text>
-                  <View style={styles.priorityBadge}>
-                    <View style={[styles.priorityDot, { backgroundColor: getPriorityColor(task.priority) }]} />
-                    <Text style={styles.priorityText}>{task.priority} priority</Text>
-                  </View>
-                </View>
-
-                {/* Delete Button */}
-                <TouchableOpacity onPress={() => deleteTask(task.id)} style={styles.deleteBtn}>
-                  <Ionicons name="trash-outline" size={20} color="#FF3B30" />
-                </TouchableOpacity>
-              </View>
-            ))
-          )}
-        </ScrollView>
+        <DraggableFlatList
+          data={filteredTasks}
+          onDragEnd={({ data }) => setTaskOrder(data)}
+          keyExtractor={(item) => item.id}
+          renderItem={renderTask}
+          contentContainerStyle={styles.scrollContent}
+        />
       )}
 
       {/* Floating Action Button */}
@@ -184,6 +199,7 @@ const styles = StyleSheet.create({
   emptyText: { textAlign: 'center', marginTop: 50, color: '#8E8E93', fontSize: 16 },
   
   taskCard: { backgroundColor: '#fff', padding: 15, borderRadius: 12, marginBottom: 10, flexDirection: 'row', alignItems: 'center', shadowColor: '#000', shadowOpacity: 0.05, shadowRadius: 5, elevation: 2 },
+  dragHandle: { marginRight: 10, justifyContent: 'center' },
   checkbox: { marginRight: 15 },
   taskInfo: { flex: 1, justifyContent: 'center' },
   taskTitle: { fontSize: 16, fontWeight: '600', color: '#1C1C1E', marginBottom: 4 },
